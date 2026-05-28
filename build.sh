@@ -12,6 +12,6 @@ em++ main.cpp liblouis/liblouis.a \
   -I . \
   --embed-file liblouis/tables@/tables \
   -s ALLOW_MEMORY_GROWTH=1 \
-  -o index.html
+  -o index.js
 
-echo "Done! Run 'python3 -m http.server' to test."
+echo "Run 'python3 -m http.server' to test."
