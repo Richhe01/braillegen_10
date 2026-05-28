@@ -2,76 +2,125 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>My Braille Translator</title>
+    <title>BrailleGen 10 - Cube STL</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: #f4f4f9;
-            padding: 40px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
         }
         .container {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-            max-width: 800px;
-            margin: 0 auto;
+            background: #ffffff;
+            padding: 30px 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 600px;
+            width: 100%;
+            box-sizing: border-box;
         }
-        /* Styling for the C++ Output Box */
+        h1 {
+            margin-top: 0;
+            color: #222;
+        }
+        button {
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-bottom: 20px;
+        }
+        button:hover:not(:disabled) {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
         #output {
             width: 100%;
-            height: 250px;
-            margin-top: 20px;
             background-color: #1e1e1e;
-            color: #00ff00; /* Hacker green text! */
-            font-family: 'Lucida Console', Monaco, monospace;
-            padding: 10px;
-            border-radius: 5px;
+            color: #00ff00;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            padding: 12px;
+            border-radius: 4px;
             border: none;
-            box-sizing: border-box;
             resize: vertical;
+            box-sizing: border-box;
+            outline: none;
         }
     </style>
 </head>
 <body>
-
     <div class="container">
-        <h1>Liblouis WebAssembly</h1>
-        <p>This is my custom user interface. The C++ standard output is routed to the box below.</p>
+        <h1>BrailleGen 10</h1>
+        <button id="downloadBtn" disabled>Download Cube STL</button>
         
-        <textarea id="output" readonly></textarea>
+        <!-- Console output text area -->
+        <textarea id="output" rows="10" readonly></textarea>
     </div>
 
-    <script type='text/javascript'>
-        var outputElement = document.getElementById('output');
+    <script>
+        const outputElement = document.getElementById('output');
         
-        // Clear the box on page load
-        if (outputElement) outputElement.value = ''; 
-
-        // Define the Emscripten Module
+        // Pre-define Module to configure Emscripten before loading it
         var Module = {
-            print: function(...args) {
-                var text = args.join(' ');
-                console.log(text); // Keep it in the F12 console just in case
-                
+            print: function(text) {
+                if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
+                console.log(text);
                 if (outputElement) {
                     outputElement.value += text + "\n";
-                    outputElement.scrollTop = outputElement.scrollHeight; // Auto-scroll to bottom
+                    outputElement.scrollTop = outputElement.scrollHeight; // Focus on bottom
                 }
             },
-            printErr: function(...args) {
-                // Route C++ std::cerr to the same box, but you could handle it differently
-                var text = args.join(' ');
+            printErr: function(text) {
+                if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
                 console.error(text);
                 if (outputElement) {
                     outputElement.value += "[ERROR] " + text + "\n";
-                    outputElement.scrollTop = outputElement.scrollHeight;
+                    outputElement.scrollTop = outputElement.scrollHeight; // Focus on bottom
                 }
+            },
+            onRuntimeInitialized: () => {
+                const btn = document.getElementById('downloadBtn');
+                btn.disabled = false; // Enable button once WASM is ready
+
+                btn.addEventListener('click', () => {
+                    // 1. Trigger the C++ STL generation
+                    Module.ccall('generateCubeSTL', null, [], []);
+                    
+                    // 2. Read the generated STL from the Emscripten virtual file system
+                    try {
+                        const stlData = FS.readFile('cube.stl');
+                        const blob = new Blob([stlData], { type: 'application/octet-stream' });
+                        const url = URL.createObjectURL(blob);
+                        
+                        // 3. Perform a hidden "click" to prompt the download
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'cube.stl';
+                        a.click();
+                        URL.revokeObjectURL(url);
+                    } catch (e) {
+                        console.error("Error reading cube.stl:", e);
+                        Module.printErr("Error reading cube.stl: " + e);
+                    }
+                });
             }
         };
     </script>
-
-    <script async type="text/javascript" src="index.js"></script>
-
+    
+    <!-- Load the Emscripten-generated JavaScript -->
+    <script src="index.js"></script>
 </body>
 </html>
