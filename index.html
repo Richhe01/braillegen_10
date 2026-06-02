@@ -98,7 +98,8 @@
         }
 
         .settings-grid input[type="number"], 
-        .settings-grid select {
+        .settings-grid select,
+        .settings-grid input[type="text"] {
             padding: 4px;
             border: 1px solid #a0a0a0;
             font-family: inherit;
@@ -214,27 +215,32 @@
             
             <div class="settings-grid">
                 <label for="charsPerLine">Characters per line:</label>
-                <input type="number" id="charsPerLine" value="64">
+                <input type="number" id="charsPerLine" value="32">
 
                 <label for="brailleTable">Choose braille table:</label>
-                <select id="brailleTable">
-                    <option value="en-ueb-g2.ctb">en-ueb-g2.ctb</option>
-                </select>
+                <input type="text" id="brailleTable" list="brailleTableOptions" value="en-ueb-g2.ctb">
+                <datalist id="brailleTableOptions">
+                    <option value="en-ueb-g2.ctb"></option>
+                    <option value="en-ueb-g1.ctb"></option>
+                    <option value="es-g1.ctb"></option>
+                    <option value="es-g2.ctb"></option>
+                    <option value="fr-bfu-g2.ctb"></option>
+                </datalist>
 
                 <label for="brailleHeight">Braille height mm:</label>
                 <input type="number" id="brailleHeight" value="0.6" step="0.1">
 
                 <label for="plateHeight">Plate height mm:</label>
-                <input type="number" id="plateHeight" value="0.01" step="0.01">
+                <input type="number" id="plateHeight" value="1" step="0.1">
 
                 <label for="lineSpacing">Line spacing mm:</label>
                 <input type="number" id="lineSpacing" value="3.72" step="0.01">
 
                 <label for="marginSize">Margin size mm:</label>
-                <input type="number" id="marginSize" value="0.2" step="0.1">
+                <input type="number" id="marginSize" value="1" step="0.1">
 
                 <label for="stlScale">STL export scale:</label>
-                <input type="number" id="stlScale" value="0.1" step="0.1">
+                <input type="number" id="stlScale" value="1" step="0.1">
 
                 <div class="checkbox-row">
                     <div class="main-label">Enable/Disable:</div>
@@ -253,6 +259,22 @@
         const outputElement = document.getElementById('output');
         const statusBar = document.getElementById('statusBar');
         
+        const brailleTableInput = document.getElementById('brailleTable');
+        let oldBrailleTableVal = '';
+        
+        brailleTableInput.addEventListener('focus', function() {
+            oldBrailleTableVal = this.value;
+            const options = Array.from(document.getElementById('brailleTableOptions').options).map(o => o.value);
+            if (options.includes(this.value)) {
+                this.value = '';
+            }
+        });
+        brailleTableInput.addEventListener('blur', function() {
+            if (this.value.trim() === '') {
+                this.value = oldBrailleTableVal;
+            }
+        });
+
         function validateInputs() {
             let errors = [];
 
@@ -369,12 +391,12 @@
 
                 // Optional: Setup "Defaults" button
                 document.getElementById('defaultsBtn').addEventListener('click', () => {
-                    document.getElementById('charsPerLine').value = 64;
+                    document.getElementById('charsPerLine').value = 32;
                     document.getElementById('brailleTable').value = "en-ueb-g2.ctb";
                     document.getElementById('brailleHeight').value = 0.6;
                     document.getElementById('plateHeight').value = 1;
                     document.getElementById('lineSpacing').value = 3.72;
-                    document.getElementById('marginSize').value = 0.2;
+                    document.getElementById('marginSize').value = 1;
                     document.getElementById('stlScale').value = 1;
                     document.getElementById('slabMode').checked = false;
                     document.getElementById('verticalExport').checked = false;
