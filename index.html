@@ -2,85 +2,298 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>BrailleGen 10 - Cube STL</title>
+    <title>Braille Tile Generator</title>
     <style>
+        /* Mimic standard Windows desktop application styling */
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f4f4f9;
-            color: #333;
+            font-family: 'Bahnschrift', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f0f0;
+            color: #000;
             display: flex;
             align-items: center;
             justify-content: center;
             min-height: 100vh;
             margin: 0;
         }
-        .container {
-            background: #ffffff;
-            padding: 30px 40px;
-            border-radius: 8px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-            text-align: center;
-            max-width: 600px;
+        
+        .window {
+            background: #f0f0f0;
+            border: 1px solid #ccc;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            width: 500px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .menu-bar {
+            background-color: #f0f0f0;
+            padding: 4px 8px;
+            font-size: 14px;
+            border-bottom: 1px solid #d9d9d9;
+        }
+
+        .content {
+            padding: 15px 20px;
+        }
+
+        h2 {
+            font-size: 22px;
+            margin: 0 0 15px 0;
+            text-transform: capitalize;
+            letter-spacing: 0.5px;
+        }
+
+        /* Top Section Layout */
+        .top-section {
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 20px;
+        }
+
+        .text-input-row {
+            display: flex;
+            margin-bottom: 15px;
+        }
+
+        .text-input-row label {
+            font-weight: bold;
+            font-size: 16px;
+            width: 140px;
+            flex-shrink: 0;
+        }
+
+        textarea {
+            flex-grow: 1;
+            height: 80px;
+            resize: vertical;
+            padding: 4px;
+            font-family: inherit;
+            border: 1px solid #a0a0a0;
+        }
+
+        .generate-row {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+
+        /* Settings Grid Layout */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .settings-grid {
+            display: grid;
+            grid-template-columns: 200px 150px;
+            row-gap: 12px;
+            align-items: center;
+        }
+
+        .settings-grid label {
+            font-weight: bold;
+            font-size: 15px;
+        }
+
+        .settings-grid input[type="number"], 
+        .settings-grid select {
+            padding: 4px;
+            border: 1px solid #a0a0a0;
+            font-family: inherit;
+            font-size: 14px;
             width: 100%;
             box-sizing: border-box;
         }
-        h1 {
-            margin-top: 0;
-            color: #222;
+
+        .checkbox-row {
+            grid-column: 1 / span 2;
+            display: flex;
+            align-items: center;
+            margin-top: 5px;
         }
+
+        .checkbox-row .main-label {
+            font-weight: bold;
+            font-size: 15px;
+            width: 200px;
+        }
+
+        .checkbox-row label {
+            font-weight: bold;
+            font-size: 14px;
+            margin-right: 20px;
+            display: flex;
+            align-items: center;
+        }
+
+        .checkbox-row input[type="checkbox"] {
+            margin-right: 5px;
+        }
+
+        /* Buttons */
         button {
-            background-color: #007bff;
-            color: #fff;
-            border: none;
-            padding: 12px 24px;
+            background-color: #ffffff;
+            color: #000;
+            border: 1px solid #a0a0a0;
+            padding: 6px 15px;
             font-size: 16px;
-            border-radius: 4px;
+            font-weight: bold;
             cursor: pointer;
-            transition: background-color 0.2s;
-            margin-bottom: 20px;
+            transition: background-color 0.1s;
         }
+
         button:hover:not(:disabled) {
-            background-color: #0056b3;
+            background-color: #e6e6e6;
         }
-        button:disabled {
+
+        button:active:not(:disabled) {
             background-color: #cccccc;
+        }
+
+        button:disabled {
+            color: #888;
             cursor: not-allowed;
         }
+
+        #generateBtn {
+            font-size: 18px;
+            padding: 8px 30px;
+        }
+
+        #defaultsBtn {
+            font-size: 14px;
+            padding: 4px 12px;
+        }
+
+        /* Status & Console */
+        .status-bar {
+            padding: 4px 10px;
+            font-size: 14px;
+            color: #555;
+            border-top: 1px solid #d9d9d9;
+            background-color: #f0f0f0;
+        }
+
         #output {
             width: 100%;
             background-color: #1e1e1e;
             color: #00ff00;
             font-family: 'Courier New', Courier, monospace;
-            font-size: 14px;
-            padding: 12px;
-            border-radius: 4px;
+            font-size: 12px;
+            padding: 8px;
             border: none;
             resize: vertical;
             box-sizing: border-box;
             outline: none;
+            margin: 0;
+            border-top: 1px solid #000;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>BrailleGen 10</h1>
-        <button id="downloadBtn" disabled>Download Cube STL</button>
+
+    <div class="window">
+        <div class="content">
+            <h2>Translation parameters:</h2>
+            <div class="top-section">
+                <div class="text-input-row">
+                    <label for="textInput">Enter text:</label>
+                    <textarea id="textInput">hello world</textarea>
+                </div>
+                <div class="generate-row">
+                    <button id="generateBtn" disabled>Generate</button>
+                </div>
+            </div>
+
+            <div class="section-header">
+                <h2>Braille tile parameters:</h2>
+                <button id="defaultsBtn">Defaults</button>
+            </div>
+            
+            <div class="settings-grid">
+                <label for="charsPerLine">Characters per line:</label>
+                <input type="number" id="charsPerLine" value="64">
+
+                <label for="brailleTable">Choose braille table:</label>
+                <select id="brailleTable">
+                    <option value="en-ueb-g2.ctb">en-ueb-g2.ctb</option>
+                </select>
+
+                <label for="brailleHeight">Braille height mm:</label>
+                <input type="number" id="brailleHeight" value="0.6" step="0.1">
+
+                <label for="plateHeight">Plate height mm:</label>
+                <input type="number" id="plateHeight" value="0.01" step="0.01">
+
+                <label for="lineSpacing">Line spacing mm:</label>
+                <input type="number" id="lineSpacing" value="3.72" step="0.01">
+
+                <label for="marginSize">Margin size mm:</label>
+                <input type="number" id="marginSize" value="0.2" step="0.1">
+
+                <label for="stlScale">STL export scale:</label>
+                <input type="number" id="stlScale" value="0.1" step="0.1">
+
+                <div class="checkbox-row">
+                    <div class="main-label">Enable/Disable:</div>
+                    <label><input type="checkbox" id="slabMode"> Slab mode</label>
+                    <label><input type="checkbox" id="verticalExport"> Vertical export</label>
+                </div>
+            </div>
+        </div>
+
+        <div class="status-bar" id="statusBar">Braillegen loading WASM...</div>
         
-        <!-- Console output text area -->
-        <textarea id="output" rows="10" readonly></textarea>
+        <textarea id="output" rows="4" readonly placeholder="Console output..."></textarea>
     </div>
 
     <script>
         const outputElement = document.getElementById('output');
+        const statusBar = document.getElementById('statusBar');
         
-        // Pre-define Module to configure Emscripten before loading it
+        function validateInputs() {
+            let errors = [];
+
+            const text = document.getElementById('textInput').value;
+            const bh = parseFloat(document.getElementById('brailleHeight').value);
+            const ph = parseFloat(document.getElementById('plateHeight').value);
+            const ls = parseFloat(document.getElementById('lineSpacing').value);
+            const ms = parseFloat(document.getElementById('marginSize').value);
+            const es = parseFloat(document.getElementById('stlScale').value);
+
+            if (text.trim() === "") {
+                errors.push("Text input can not be blank");
+            }
+            if (isNaN(bh) || bh < 0.4) {
+                errors.push("Braille height must be greater than or equal to 0.4");
+            }
+            if (isNaN(ph) || ph < 0) {
+                errors.push("Plate height must be greater than or equal to 0");
+            }
+            if (isNaN(ls) || ls < 0.1) {
+                errors.push("Line spacing must be greater than or equal to 0.1");
+            }
+            if (isNaN(ms) || ms < 0) {
+                errors.push("Margin size must be greater than or equal to 0");
+            }
+            if (isNaN(es) || es < 0.01) {
+                errors.push("Export scale must be greater than or equal to 0.01");
+            }
+
+            return errors;
+        }
+
+        // Emscripten Module Setup
+
         var Module = {
             print: function(text) {
                 if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
                 console.log(text);
                 if (outputElement) {
                     outputElement.value += text + "\n";
-                    outputElement.scrollTop = outputElement.scrollHeight; // Focus on bottom
+                    outputElement.scrollTop = outputElement.scrollHeight; 
                 }
             },
             printErr: function(text) {
@@ -88,39 +301,89 @@
                 console.error(text);
                 if (outputElement) {
                     outputElement.value += "[ERROR] " + text + "\n";
-                    outputElement.scrollTop = outputElement.scrollHeight; // Focus on bottom
+                    outputElement.scrollTop = outputElement.scrollHeight; 
                 }
             },
+
+            
             onRuntimeInitialized: () => {
-                const btn = document.getElementById('downloadBtn');
-                btn.disabled = false; // Enable button once WASM is ready
+                const btn = document.getElementById('generateBtn');
+                btn.disabled = false; 
+                statusBar.innerText = "Braillegen ready!";
 
                 btn.addEventListener('click', () => {
-                    // 1. Trigger the C++ STL generation
-                    Module.ccall('generateCubeSTL', null, [], []);
+
+                    // 1. Run validation first (validate chars per line in c++ after text is translated))
+                    const validationErrors = validateInputs();
                     
-                    // 2. Read the generated STL from the Emscripten virtual file system
+                    if (validationErrors.length > 0) {
+                        // Print errors to the status bar and console, then abort
+                        statusBar.innerText = "Validation failed. See console.";
+                        validationErrors.forEach(err => Module.printErr(err));
+                        return; 
+                    }
+                    statusBar.innerText = "Generating...";
+                    
+                    // 2. Gather all inputs for your C++ program
+                    const params = {
+                        text: document.getElementById('textInput').value,
+                        charsPerLine: parseInt(document.getElementById('charsPerLine').value),
+                        brailleTable: document.getElementById('brailleTable').value,
+                        brailleHeight: parseFloat(document.getElementById('brailleHeight').value),
+                        plateHeight: parseFloat(document.getElementById('plateHeight').value),
+                        lineSpacing: parseFloat(document.getElementById('lineSpacing').value),
+                        marginSize: parseFloat(document.getElementById('marginSize').value),
+                        stlScale: parseFloat(document.getElementById('stlScale').value),
+                        slabMode: document.getElementById('slabMode').checked,
+                        verticalExport: document.getElementById('verticalExport').checked
+                    };
+
+                    console.log("Sending parameters to C++:", params);
+
+                    // 2. Trigger the C++ STL generation
+                    Module.ccall('generateBrailleSTL', null, 
+                        ['string', 'number', 'string', 'number', 'number', 'number', 'number', 'number', 'boolean', 'boolean'], 
+                        [params.text, params.charsPerLine, params.brailleTable, params.brailleHeight, params.plateHeight, params.lineSpacing, params.marginSize, params.stlScale, params.slabMode, params.verticalExport]
+                    );
+                    
+                    // 3. Read the generated STL from Emscripten VFS
                     try {
-                        const stlData = FS.readFile('cube.stl');
+                        const stlData = FS.readFile('braille_plate.stl');
                         const blob = new Blob([stlData], { type: 'application/octet-stream' });
                         const url = URL.createObjectURL(blob);
                         
-                        // 3. Perform a hidden "click" to prompt the download
+                        // Perform a hidden "click" to prompt the download
                         const a = document.createElement('a');
                         a.href = url;
-                        a.download = 'cube.stl';
+                        a.download = 'braille_plate.stl';
                         a.click();
                         URL.revokeObjectURL(url);
+                        
+                        statusBar.innerText = "Download complete. Braillegen ready!";
                     } catch (e) {
-                        console.error("Error reading cube.stl:", e);
-                        Module.printErr("Error reading cube.stl: " + e);
+                        console.error("Error reading braille_plate.stl:", e);
+                        Module.printErr("Error reading braille_plate.stl: " + e);
+                        statusBar.innerText = "Error generating file.";
                     }
+                });
+
+                // Optional: Setup "Defaults" button
+                document.getElementById('defaultsBtn').addEventListener('click', () => {
+                    document.getElementById('charsPerLine').value = 64;
+                    document.getElementById('brailleTable').value = "en-ueb-g2.ctb";
+                    document.getElementById('brailleHeight').value = 0.6;
+                    document.getElementById('plateHeight').value = 1;
+                    document.getElementById('lineSpacing').value = 3.72;
+                    document.getElementById('marginSize').value = 0.2;
+                    document.getElementById('stlScale').value = 1;
+                    document.getElementById('slabMode').checked = false;
+                    document.getElementById('verticalExport').checked = false;
+                    Module.print("Restored default parameters.");
                 });
             }
         };
     </script>
     
-    <!-- Load the Emscripten-generated JavaScript -->
     <script src="index.js"></script>
 </body>
 </html>

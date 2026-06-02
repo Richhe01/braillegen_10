@@ -1042,6 +1042,25 @@ async function createWasm() {
 
   
   
+  var ___cxa_rethrow = () => {
+      var info = exceptionCaught.pop();
+      if (!info) {
+        abort('no exception to throw');
+      }
+      var ptr = info.excPtr;
+      if (!info.get_rethrown()) {
+        // Only pop if the corresponding push was through rethrow_primary_exception
+        exceptionCaught.push(info);
+        info.set_rethrown(true);
+        info.set_caught(false);
+        uncaughtExceptionCount++;
+      }
+      exceptionLast = ptr;
+      assert(false, 'Exception thrown, but exception catching is not enabled. Compile with -sNO_DISABLE_EXCEPTION_CATCHING or -sEXCEPTION_CATCHING_ALLOWED=[..] to catch.');
+    };
+
+  
+  
   var ___cxa_throw = (ptr, type, destructor) => {
       var info = new ExceptionInfo(ptr);
       // Initialize ExceptionInfo content after it was allocated in __cxa_allocate_exception.
@@ -1058,16 +1077,6 @@ async function createWasm() {
       assert(false, 'Exception thrown, but exception catching is not enabled. Compile with -sNO_DISABLE_EXCEPTION_CATCHING or -sEXCEPTION_CATCHING_ALLOWED=[..] to catch.');
     };
 
-  var syscallGetVarargI = () => {
-      assert(SYSCALLS.varargs != undefined);
-      // the `+` prepended here is necessary to convince the JSCompiler that varargs is indeed a number.
-      var ret = HEAP32[((+SYSCALLS.varargs)>>2)];
-      SYSCALLS.varargs += 4;
-      return ret;
-    };
-  var syscallGetVarargP = syscallGetVarargI;
-  
-  
   var PATH = {
   isAbs:(path) => path.charAt(0) === '/',
   splitPath:(filename) => {
@@ -3809,6 +3818,57 @@ var findStringEnd = (heapOrArray, idx, maxBytesToRead, ignoreNul) => {
         return ret;
       },
   };
+  function ___syscall_chmod(path, mode) {
+  try {
+  
+      path = SYSCALLS.getStr(path);
+      FS.chmod(path, mode);
+      return 0;
+    } catch (e) {
+    if (typeof FS == 'undefined' || !(e.name === 'ErrnoError')) throw e;
+    return -e.errno;
+  }
+  }
+
+  function ___syscall_faccessat(dirfd, path, amode, flags) {
+  try {
+  
+      path = SYSCALLS.getStr(path);
+      assert(!flags || flags == 512);
+      path = SYSCALLS.calculateAt(dirfd, path);
+      if (amode & ~7) {
+        // need a valid mode
+        return -28;
+      }
+      var lookup = FS.lookupPath(path, { follow: true });
+      var node = lookup.node;
+      if (!node) {
+        return -44;
+      }
+      var perms = '';
+      if (amode & 4) perms += 'r';
+      if (amode & 2) perms += 'w';
+      if (amode & 1) perms += 'x';
+      if (perms /* otherwise, they've just passed F_OK */ && FS.nodePermissions(node, perms)) {
+        return -2;
+      }
+      return 0;
+    } catch (e) {
+    if (typeof FS == 'undefined' || !(e.name === 'ErrnoError')) throw e;
+    return -e.errno;
+  }
+  }
+
+  var syscallGetVarargI = () => {
+      assert(SYSCALLS.varargs != undefined);
+      // the `+` prepended here is necessary to convince the JSCompiler that varargs is indeed a number.
+      var ret = HEAP32[((+SYSCALLS.varargs)>>2)];
+      SYSCALLS.varargs += 4;
+      return ret;
+    };
+  var syscallGetVarargP = syscallGetVarargI;
+  
+  
   function ___syscall_fcntl64(fd, cmd, varargs) {
   SYSCALLS.varargs = varargs;
   try {
@@ -4161,6 +4221,42 @@ var findStringEnd = (heapOrArray, idx, maxBytesToRead, ignoreNul) => {
       }
     };
 
+  var _emscripten_get_now = () => performance.now();
+  
+  var _emscripten_date_now = () => Date.now();
+  
+  var nowIsMonotonic = 1;
+  
+  var checkWasiClock = (clock_id) => clock_id >= 0 && clock_id <= 3;
+  
+  var INT53_MAX = 9007199254740992;
+  
+  var INT53_MIN = -9007199254740992;
+  var bigintToI53Checked = (num) => (num < INT53_MIN || num > INT53_MAX) ? NaN : Number(num);
+  function _clock_time_get(clk_id, ignored_precision, ptime) {
+    ignored_precision = bigintToI53Checked(ignored_precision);
+  
+  
+      if (!checkWasiClock(clk_id)) {
+        return 28;
+      }
+      var now;
+      // all wasi clocks but realtime are monotonic
+      if (clk_id === 0) {
+        now = _emscripten_date_now();
+      } else if (nowIsMonotonic) {
+        now = _emscripten_get_now();
+      } else {
+        return 52;
+      }
+      // "now" is in ms, and wasi times are in ns.
+      var nsec = Math.round(now * 1000 * 1000);
+      HEAP64[((ptime)>>3)] = BigInt(nsec);
+      return 0;
+    ;
+  }
+
+
   var jsStackTrace = () => new Error().stack.toString();
   
   /** @param {number=} flags */
@@ -4457,10 +4553,6 @@ var findStringEnd = (heapOrArray, idx, maxBytesToRead, ignoreNul) => {
   }
 
   
-  var INT53_MAX = 9007199254740992;
-  
-  var INT53_MIN = -9007199254740992;
-  var bigintToI53Checked = (num) => (num < INT53_MIN || num > INT53_MAX) ? NaN : Number(num);
   function _fd_seek(fd, offset, whence, newOffset) {
     offset = bigintToI53Checked(offset);
   
@@ -4529,7 +4621,7 @@ var findStringEnd = (heapOrArray, idx, maxBytesToRead, ignoreNul) => {
       checkStackCookie();
       if (e instanceof WebAssembly.RuntimeError) {
         if (_emscripten_stack_get_current() <= 0) {
-          err('Stack overflow detected.  You can try increasing -sSTACK_SIZE (currently set to 65536)');
+          err('Stack overflow detected.  You can try increasing -sSTACK_SIZE (currently set to 5242880)');
         }
       }
       quit_(1, e);
@@ -4802,7 +4894,6 @@ if (Module['wasmBinary']) wasmBinary = Module['wasmBinary'];
   'setCanvasElementSize',
   'getCanvasElementSize',
   'convertPCtoSourceLocation',
-  'checkWasiClock',
   'wasiRightsToMuslOFlags',
   'wasiOFlagsToMuslOFlags',
   'safeSetTimeout',
@@ -4936,6 +5027,7 @@ missingLibrarySymbols.forEach(missingLibrarySymbol)
   'UNWIND_CACHE',
   'ExitStatus',
   'getEnvStrings',
+  'checkWasiClock',
   'doReadv',
   'doWritev',
   'initRandomFill',
@@ -5112,7 +5204,9 @@ function checkIncomingModuleAPI() {
 function OSD_MemInfo_getModuleHeapLength() { return Module.HEAP8.length; }
 
 // Imports from the Wasm binary.
-var _generateCubeSTL = Module['_generateCubeSTL'] = makeInvalidEarlyAccess('_generateCubeSTL');
+var _generateBrailleSTL = Module['_generateBrailleSTL'] = makeInvalidEarlyAccess('_generateBrailleSTL');
+var _lou_registerLogCallback = Module['_lou_registerLogCallback'] = makeInvalidEarlyAccess('_lou_registerLogCallback');
+var _lou_translateString = Module['_lou_translateString'] = makeInvalidEarlyAccess('_lou_translateString');
 var _lou_version = Module['_lou_version'] = makeInvalidEarlyAccess('_lou_version');
 var _main = Module['_main'] = makeInvalidEarlyAccess('_main');
 var _lou_setDataPath = Module['_lou_setDataPath'] = makeInvalidEarlyAccess('_lou_setDataPath');
@@ -5153,6 +5247,24 @@ var __lou_compileTranslationRule = Module['__lou_compileTranslationRule'] = make
 var __lou_compileDisplayRule = Module['__lou_compileDisplayRule'] = makeInvalidEarlyAccess('__lou_compileDisplayRule');
 var __lou_pattern_compile = Module['__lou_pattern_compile'] = makeInvalidEarlyAccess('__lou_pattern_compile');
 var __lou_pattern_reverse = Module['__lou_pattern_reverse'] = makeInvalidEarlyAccess('__lou_pattern_reverse');
+var __lou_translate = Module['__lou_translate'] = makeInvalidEarlyAccess('__lou_translate');
+var _lou_translate = Module['_lou_translate'] = makeInvalidEarlyAccess('_lou_translate');
+var __lou_logWidecharBuf = Module['__lou_logWidecharBuf'] = makeInvalidEarlyAccess('__lou_logWidecharBuf');
+var __lou_isValidMode = Module['__lou_isValidMode'] = makeInvalidEarlyAccess('__lou_isValidMode');
+var __lou_resetPassVariables = Module['__lou_resetPassVariables'] = makeInvalidEarlyAccess('__lou_resetPassVariables');
+var __lou_showDots = Module['__lou_showDots'] = makeInvalidEarlyAccess('__lou_showDots');
+var __lou_pattern_check = Module['__lou_pattern_check'] = makeInvalidEarlyAccess('__lou_pattern_check');
+var _lou_translatePrehyphenated = Module['_lou_translatePrehyphenated'] = makeInvalidEarlyAccess('_lou_translatePrehyphenated');
+var _lou_hyphenate = Module['_lou_hyphenate'] = makeInvalidEarlyAccess('_lou_hyphenate');
+var _lou_backTranslate = Module['_lou_backTranslate'] = makeInvalidEarlyAccess('_lou_backTranslate');
+var _lou_dotsToChar = Module['_lou_dotsToChar'] = makeInvalidEarlyAccess('_lou_dotsToChar');
+var _lou_charToDots = Module['_lou_charToDots'] = makeInvalidEarlyAccess('_lou_charToDots');
+var __lou_handlePassVariableTest = Module['__lou_handlePassVariableTest'] = makeInvalidEarlyAccess('__lou_handlePassVariableTest');
+var __lou_handlePassVariableAction = Module['__lou_handlePassVariableAction'] = makeInvalidEarlyAccess('__lou_handlePassVariableAction');
+var __lou_charToFallbackDots = Module['__lou_charToFallbackDots'] = makeInvalidEarlyAccess('__lou_charToFallbackDots');
+var _lou_backTranslateString = Module['_lou_backTranslateString'] = makeInvalidEarlyAccess('_lou_backTranslateString');
+var __lou_backTranslate = Module['__lou_backTranslate'] = makeInvalidEarlyAccess('__lou_backTranslate');
+var __lou_unknownDots = Module['__lou_unknownDots'] = makeInvalidEarlyAccess('__lou_unknownDots');
 var _lou_indexTables = Module['_lou_indexTables'] = makeInvalidEarlyAccess('_lou_indexTables');
 var _lou_findTable = Module['_lou_findTable'] = makeInvalidEarlyAccess('_lou_findTable');
 var _lou_freeTableFile = Module['_lou_freeTableFile'] = makeInvalidEarlyAccess('_lou_freeTableFile');
@@ -5160,18 +5272,11 @@ var _lou_findTables = Module['_lou_findTables'] = makeInvalidEarlyAccess('_lou_f
 var _lou_getTableInfo = Module['_lou_getTableInfo'] = makeInvalidEarlyAccess('_lou_getTableInfo');
 var _lou_freeTableInfo = Module['_lou_freeTableInfo'] = makeInvalidEarlyAccess('_lou_freeTableInfo');
 var _lou_listTables = Module['_lou_listTables'] = makeInvalidEarlyAccess('_lou_listTables');
-var __lou_pattern_check = Module['__lou_pattern_check'] = makeInvalidEarlyAccess('__lou_pattern_check');
-var __lou_logWidecharBuf = Module['__lou_logWidecharBuf'] = makeInvalidEarlyAccess('__lou_logWidecharBuf');
 var _lou_logPrint = Module['_lou_logPrint'] = makeInvalidEarlyAccess('_lou_logPrint');
 var _fflush = makeInvalidEarlyAccess('_fflush');
-var _lou_registerLogCallback = Module['_lou_registerLogCallback'] = makeInvalidEarlyAccess('_lou_registerLogCallback');
 var _lou_setLogLevel = Module['_lou_setLogLevel'] = makeInvalidEarlyAccess('_lou_setLogLevel');
 var _lou_logFile = Module['_lou_logFile'] = makeInvalidEarlyAccess('_lou_logFile');
-var __lou_unknownDots = Module['__lou_unknownDots'] = makeInvalidEarlyAccess('__lou_unknownDots');
-var __lou_showDots = Module['__lou_showDots'] = makeInvalidEarlyAccess('__lou_showDots');
 var __lou_showAttributes = Module['__lou_showAttributes'] = makeInvalidEarlyAccess('__lou_showAttributes');
-var __lou_isValidMode = Module['__lou_isValidMode'] = makeInvalidEarlyAccess('__lou_isValidMode');
-var __lou_charToFallbackDots = Module['__lou_charToFallbackDots'] = makeInvalidEarlyAccess('__lou_charToFallbackDots');
 var _emscripten_stack_get_end = makeInvalidEarlyAccess('_emscripten_stack_get_end');
 var _emscripten_stack_get_base = makeInvalidEarlyAccess('_emscripten_stack_get_base');
 var _strerror = makeInvalidEarlyAccess('_strerror');
@@ -5191,7 +5296,9 @@ var wasmMemory = makeInvalidEarlyAccess('wasmMemory');
 var wasmTable = makeInvalidEarlyAccess('wasmTable');
 
 function assignWasmExports(wasmExports) {
-  assert(typeof wasmExports['generateCubeSTL'] != 'undefined', 'missing Wasm export: generateCubeSTL');
+  assert(typeof wasmExports['generateBrailleSTL'] != 'undefined', 'missing Wasm export: generateBrailleSTL');
+  assert(typeof wasmExports['lou_registerLogCallback'] != 'undefined', 'missing Wasm export: lou_registerLogCallback');
+  assert(typeof wasmExports['lou_translateString'] != 'undefined', 'missing Wasm export: lou_translateString');
   assert(typeof wasmExports['lou_version'] != 'undefined', 'missing Wasm export: lou_version');
   assert(typeof wasmExports['main'] != 'undefined', 'missing Wasm export: main');
   assert(typeof wasmExports['lou_setDataPath'] != 'undefined', 'missing Wasm export: lou_setDataPath');
@@ -5232,6 +5339,24 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['_lou_compileDisplayRule'] != 'undefined', 'missing Wasm export: _lou_compileDisplayRule');
   assert(typeof wasmExports['_lou_pattern_compile'] != 'undefined', 'missing Wasm export: _lou_pattern_compile');
   assert(typeof wasmExports['_lou_pattern_reverse'] != 'undefined', 'missing Wasm export: _lou_pattern_reverse');
+  assert(typeof wasmExports['_lou_translate'] != 'undefined', 'missing Wasm export: _lou_translate');
+  assert(typeof wasmExports['lou_translate'] != 'undefined', 'missing Wasm export: lou_translate');
+  assert(typeof wasmExports['_lou_logWidecharBuf'] != 'undefined', 'missing Wasm export: _lou_logWidecharBuf');
+  assert(typeof wasmExports['_lou_isValidMode'] != 'undefined', 'missing Wasm export: _lou_isValidMode');
+  assert(typeof wasmExports['_lou_resetPassVariables'] != 'undefined', 'missing Wasm export: _lou_resetPassVariables');
+  assert(typeof wasmExports['_lou_showDots'] != 'undefined', 'missing Wasm export: _lou_showDots');
+  assert(typeof wasmExports['_lou_pattern_check'] != 'undefined', 'missing Wasm export: _lou_pattern_check');
+  assert(typeof wasmExports['lou_translatePrehyphenated'] != 'undefined', 'missing Wasm export: lou_translatePrehyphenated');
+  assert(typeof wasmExports['lou_hyphenate'] != 'undefined', 'missing Wasm export: lou_hyphenate');
+  assert(typeof wasmExports['lou_backTranslate'] != 'undefined', 'missing Wasm export: lou_backTranslate');
+  assert(typeof wasmExports['lou_dotsToChar'] != 'undefined', 'missing Wasm export: lou_dotsToChar');
+  assert(typeof wasmExports['lou_charToDots'] != 'undefined', 'missing Wasm export: lou_charToDots');
+  assert(typeof wasmExports['_lou_handlePassVariableTest'] != 'undefined', 'missing Wasm export: _lou_handlePassVariableTest');
+  assert(typeof wasmExports['_lou_handlePassVariableAction'] != 'undefined', 'missing Wasm export: _lou_handlePassVariableAction');
+  assert(typeof wasmExports['_lou_charToFallbackDots'] != 'undefined', 'missing Wasm export: _lou_charToFallbackDots');
+  assert(typeof wasmExports['lou_backTranslateString'] != 'undefined', 'missing Wasm export: lou_backTranslateString');
+  assert(typeof wasmExports['_lou_backTranslate'] != 'undefined', 'missing Wasm export: _lou_backTranslate');
+  assert(typeof wasmExports['_lou_unknownDots'] != 'undefined', 'missing Wasm export: _lou_unknownDots');
   assert(typeof wasmExports['lou_indexTables'] != 'undefined', 'missing Wasm export: lou_indexTables');
   assert(typeof wasmExports['lou_findTable'] != 'undefined', 'missing Wasm export: lou_findTable');
   assert(typeof wasmExports['lou_freeTableFile'] != 'undefined', 'missing Wasm export: lou_freeTableFile');
@@ -5239,18 +5364,11 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['lou_getTableInfo'] != 'undefined', 'missing Wasm export: lou_getTableInfo');
   assert(typeof wasmExports['lou_freeTableInfo'] != 'undefined', 'missing Wasm export: lou_freeTableInfo');
   assert(typeof wasmExports['lou_listTables'] != 'undefined', 'missing Wasm export: lou_listTables');
-  assert(typeof wasmExports['_lou_pattern_check'] != 'undefined', 'missing Wasm export: _lou_pattern_check');
-  assert(typeof wasmExports['_lou_logWidecharBuf'] != 'undefined', 'missing Wasm export: _lou_logWidecharBuf');
   assert(typeof wasmExports['lou_logPrint'] != 'undefined', 'missing Wasm export: lou_logPrint');
   assert(typeof wasmExports['fflush'] != 'undefined', 'missing Wasm export: fflush');
-  assert(typeof wasmExports['lou_registerLogCallback'] != 'undefined', 'missing Wasm export: lou_registerLogCallback');
   assert(typeof wasmExports['lou_setLogLevel'] != 'undefined', 'missing Wasm export: lou_setLogLevel');
   assert(typeof wasmExports['lou_logFile'] != 'undefined', 'missing Wasm export: lou_logFile');
-  assert(typeof wasmExports['_lou_unknownDots'] != 'undefined', 'missing Wasm export: _lou_unknownDots');
-  assert(typeof wasmExports['_lou_showDots'] != 'undefined', 'missing Wasm export: _lou_showDots');
   assert(typeof wasmExports['_lou_showAttributes'] != 'undefined', 'missing Wasm export: _lou_showAttributes');
-  assert(typeof wasmExports['_lou_isValidMode'] != 'undefined', 'missing Wasm export: _lou_isValidMode');
-  assert(typeof wasmExports['_lou_charToFallbackDots'] != 'undefined', 'missing Wasm export: _lou_charToFallbackDots');
   assert(typeof wasmExports['emscripten_stack_get_end'] != 'undefined', 'missing Wasm export: emscripten_stack_get_end');
   assert(typeof wasmExports['emscripten_stack_get_base'] != 'undefined', 'missing Wasm export: emscripten_stack_get_base');
   assert(typeof wasmExports['strerror'] != 'undefined', 'missing Wasm export: strerror');
@@ -5266,7 +5384,9 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['__cxa_get_exception_ptr'] != 'undefined', 'missing Wasm export: __cxa_get_exception_ptr');
   assert(typeof wasmExports['memory'] != 'undefined', 'missing Wasm export: memory');
   assert(typeof wasmExports['__indirect_function_table'] != 'undefined', 'missing Wasm export: __indirect_function_table');
-  _generateCubeSTL = Module['_generateCubeSTL'] = createExportWrapper('generateCubeSTL', 0);
+  _generateBrailleSTL = Module['_generateBrailleSTL'] = createExportWrapper('generateBrailleSTL', 10);
+  _lou_registerLogCallback = Module['_lou_registerLogCallback'] = createExportWrapper('lou_registerLogCallback', 1);
+  _lou_translateString = Module['_lou_translateString'] = createExportWrapper('lou_translateString', 8);
   _lou_version = Module['_lou_version'] = createExportWrapper('lou_version', 0);
   _main = Module['_main'] = createExportWrapper('main', 2);
   _lou_setDataPath = Module['_lou_setDataPath'] = createExportWrapper('lou_setDataPath', 1);
@@ -5307,6 +5427,24 @@ function assignWasmExports(wasmExports) {
   __lou_compileDisplayRule = Module['__lou_compileDisplayRule'] = createExportWrapper('_lou_compileDisplayRule', 2);
   __lou_pattern_compile = Module['__lou_pattern_compile'] = createExportWrapper('_lou_pattern_compile', 6);
   __lou_pattern_reverse = Module['__lou_pattern_reverse'] = createExportWrapper('_lou_pattern_reverse', 1);
+  __lou_translate = Module['__lou_translate'] = createExportWrapper('_lou_translate', 14);
+  _lou_translate = Module['_lou_translate'] = createExportWrapper('lou_translate', 11);
+  __lou_logWidecharBuf = Module['__lou_logWidecharBuf'] = createExportWrapper('_lou_logWidecharBuf', 4);
+  __lou_isValidMode = Module['__lou_isValidMode'] = createExportWrapper('_lou_isValidMode', 1);
+  __lou_resetPassVariables = Module['__lou_resetPassVariables'] = createExportWrapper('_lou_resetPassVariables', 0);
+  __lou_showDots = Module['__lou_showDots'] = createExportWrapper('_lou_showDots', 2);
+  __lou_pattern_check = Module['__lou_pattern_check'] = createExportWrapper('_lou_pattern_check', 6);
+  _lou_translatePrehyphenated = Module['_lou_translatePrehyphenated'] = createExportWrapper('lou_translatePrehyphenated', 13);
+  _lou_hyphenate = Module['_lou_hyphenate'] = createExportWrapper('lou_hyphenate', 5);
+  _lou_backTranslate = Module['_lou_backTranslate'] = createExportWrapper('lou_backTranslate', 11);
+  _lou_dotsToChar = Module['_lou_dotsToChar'] = createExportWrapper('lou_dotsToChar', 5);
+  _lou_charToDots = Module['_lou_charToDots'] = createExportWrapper('lou_charToDots', 5);
+  __lou_handlePassVariableTest = Module['__lou_handlePassVariableTest'] = createExportWrapper('_lou_handlePassVariableTest', 3);
+  __lou_handlePassVariableAction = Module['__lou_handlePassVariableAction'] = createExportWrapper('_lou_handlePassVariableAction', 2);
+  __lou_charToFallbackDots = Module['__lou_charToFallbackDots'] = createExportWrapper('_lou_charToFallbackDots', 1);
+  _lou_backTranslateString = Module['_lou_backTranslateString'] = createExportWrapper('lou_backTranslateString', 8);
+  __lou_backTranslate = Module['__lou_backTranslate'] = createExportWrapper('_lou_backTranslate', 14);
+  __lou_unknownDots = Module['__lou_unknownDots'] = createExportWrapper('_lou_unknownDots', 1);
   _lou_indexTables = Module['_lou_indexTables'] = createExportWrapper('lou_indexTables', 1);
   _lou_findTable = Module['_lou_findTable'] = createExportWrapper('lou_findTable', 1);
   _lou_freeTableFile = Module['_lou_freeTableFile'] = createExportWrapper('lou_freeTableFile', 1);
@@ -5314,18 +5452,11 @@ function assignWasmExports(wasmExports) {
   _lou_getTableInfo = Module['_lou_getTableInfo'] = createExportWrapper('lou_getTableInfo', 2);
   _lou_freeTableInfo = Module['_lou_freeTableInfo'] = createExportWrapper('lou_freeTableInfo', 1);
   _lou_listTables = Module['_lou_listTables'] = createExportWrapper('lou_listTables', 0);
-  __lou_pattern_check = Module['__lou_pattern_check'] = createExportWrapper('_lou_pattern_check', 6);
-  __lou_logWidecharBuf = Module['__lou_logWidecharBuf'] = createExportWrapper('_lou_logWidecharBuf', 4);
   _lou_logPrint = Module['_lou_logPrint'] = createExportWrapper('lou_logPrint', 2);
   _fflush = createExportWrapper('fflush', 1);
-  _lou_registerLogCallback = Module['_lou_registerLogCallback'] = createExportWrapper('lou_registerLogCallback', 1);
   _lou_setLogLevel = Module['_lou_setLogLevel'] = createExportWrapper('lou_setLogLevel', 1);
   _lou_logFile = Module['_lou_logFile'] = createExportWrapper('lou_logFile', 1);
-  __lou_unknownDots = Module['__lou_unknownDots'] = createExportWrapper('_lou_unknownDots', 1);
-  __lou_showDots = Module['__lou_showDots'] = createExportWrapper('_lou_showDots', 2);
   __lou_showAttributes = Module['__lou_showAttributes'] = createExportWrapper('_lou_showAttributes', 1);
-  __lou_isValidMode = Module['__lou_isValidMode'] = createExportWrapper('_lou_isValidMode', 1);
-  __lou_charToFallbackDots = Module['__lou_charToFallbackDots'] = createExportWrapper('_lou_charToFallbackDots', 1);
   _emscripten_stack_get_end = wasmExports['emscripten_stack_get_end'];
   _emscripten_stack_get_base = wasmExports['emscripten_stack_get_base'];
   _strerror = createExportWrapper('strerror', 1);
@@ -5345,6 +5476,8 @@ function assignWasmExports(wasmExports) {
 
 var wasmImports = {
   /** @export */
+  OSD_MemInfo_getModuleHeapLength,
+  /** @export */
   __cxa_begin_catch: ___cxa_begin_catch,
   /** @export */
   __cxa_end_catch: ___cxa_end_catch,
@@ -5357,9 +5490,15 @@ var wasmImports = {
   /** @export */
   __cxa_find_matching_catch_5: ___cxa_find_matching_catch_5,
   /** @export */
+  __cxa_rethrow: ___cxa_rethrow,
+  /** @export */
   __cxa_throw: ___cxa_throw,
   /** @export */
   __resumeException: ___resumeException,
+  /** @export */
+  __syscall_chmod: ___syscall_chmod,
+  /** @export */
+  __syscall_faccessat: ___syscall_faccessat,
   /** @export */
   __syscall_fcntl64: ___syscall_fcntl64,
   /** @export */
@@ -5385,6 +5524,10 @@ var wasmImports = {
   /** @export */
   _tzset_js: __tzset_js,
   /** @export */
+  clock_time_get: _clock_time_get,
+  /** @export */
+  emscripten_date_now: _emscripten_date_now,
+  /** @export */
   emscripten_get_callstack: _emscripten_get_callstack,
   /** @export */
   emscripten_get_heap_max: _emscripten_get_heap_max,
@@ -5405,6 +5548,10 @@ var wasmImports = {
   /** @export */
   fd_write: _fd_write,
   /** @export */
+  invoke_d,
+  /** @export */
+  invoke_ddd,
+  /** @export */
   invoke_dddd,
   /** @export */
   invoke_di,
@@ -5415,15 +5562,43 @@ var wasmImports = {
   /** @export */
   invoke_diddd,
   /** @export */
+  invoke_didddddidi,
+  /** @export */
+  invoke_didddidi,
+  /** @export */
+  invoke_didddii,
+  /** @export */
+  invoke_diddi,
+  /** @export */
   invoke_didi,
+  /** @export */
+  invoke_didii,
   /** @export */
   invoke_dii,
   /** @export */
+  invoke_diid,
+  /** @export */
+  invoke_diidd,
+  /** @export */
+  invoke_diiddd,
+  /** @export */
   invoke_diiddi,
+  /** @export */
+  invoke_diidi,
+  /** @export */
+  invoke_diidii,
   /** @export */
   invoke_diii,
   /** @export */
+  invoke_diiid,
+  /** @export */
+  invoke_diiidii,
+  /** @export */
   invoke_diiii,
+  /** @export */
+  invoke_diiiii,
+  /** @export */
+  invoke_diiiiii,
   /** @export */
   invoke_diiiiiii,
   /** @export */
@@ -5431,7 +5606,15 @@ var wasmImports = {
   /** @export */
   invoke_iddddddiidi,
   /** @export */
+  invoke_iddddiid,
+  /** @export */
+  invoke_idddii,
+  /** @export */
   invoke_iddid,
+  /** @export */
+  invoke_iddiddddi,
+  /** @export */
+  invoke_iddiddiiiii,
   /** @export */
   invoke_iddidiiii,
   /** @export */
@@ -5441,27 +5624,51 @@ var wasmImports = {
   /** @export */
   invoke_iddiiiiii,
   /** @export */
+  invoke_iddiiiiiii,
+  /** @export */
+  invoke_idid,
+  /** @export */
+  invoke_idiiididii,
+  /** @export */
   invoke_ii,
   /** @export */
   invoke_iid,
+  /** @export */
+  invoke_iidd,
   /** @export */
   invoke_iiddd,
   /** @export */
   invoke_iiddddd,
   /** @export */
+  invoke_iiddddddddiii,
+  /** @export */
+  invoke_iiddddddiiii,
+  /** @export */
+  invoke_iiddddi,
+  /** @export */
   invoke_iiddddii,
+  /** @export */
+  invoke_iidddi,
+  /** @export */
+  invoke_iidddidd,
   /** @export */
   invoke_iiddi,
   /** @export */
   invoke_iiddid,
   /** @export */
+  invoke_iiddiddidii,
+  /** @export */
   invoke_iiddii,
+  /** @export */
+  invoke_iiddiiid,
   /** @export */
   invoke_iiddiiiii,
   /** @export */
   invoke_iidi,
   /** @export */
   invoke_iidid,
+  /** @export */
+  invoke_iididdi,
   /** @export */
   invoke_iidii,
   /** @export */
@@ -5470,6 +5677,8 @@ var wasmImports = {
   invoke_iidiii,
   /** @export */
   invoke_iidiiii,
+  /** @export */
+  invoke_iif,
   /** @export */
   invoke_iii,
   /** @export */
@@ -5482,6 +5691,8 @@ var wasmImports = {
   invoke_iiidddd,
   /** @export */
   invoke_iiidddddd,
+  /** @export */
+  invoke_iiiddddid,
   /** @export */
   invoke_iiiddddii,
   /** @export */
@@ -5499,6 +5710,8 @@ var wasmImports = {
   /** @export */
   invoke_iiiddii,
   /** @export */
+  invoke_iiiddiii,
+  /** @export */
   invoke_iiiddiiii,
   /** @export */
   invoke_iiiddiiiii,
@@ -5509,7 +5722,11 @@ var wasmImports = {
   /** @export */
   invoke_iiidid,
   /** @export */
+  invoke_iiididi,
+  /** @export */
   invoke_iiidii,
+  /** @export */
+  invoke_iiidiid,
   /** @export */
   invoke_iiidiii,
   /** @export */
@@ -5523,41 +5740,111 @@ var wasmImports = {
   /** @export */
   invoke_iiiiddd,
   /** @export */
+  invoke_iiiidddd,
+  /** @export */
   invoke_iiiidddddd,
+  /** @export */
+  invoke_iiiidddddddddd,
+  /** @export */
+  invoke_iiiiddddddi,
+  /** @export */
+  invoke_iiiiddddidd,
+  /** @export */
+  invoke_iiiidddi,
+  /** @export */
+  invoke_iiiiddi,
   /** @export */
   invoke_iiiiddii,
   /** @export */
+  invoke_iiiiddiidi,
+  /** @export */
   invoke_iiiiddiii,
+  /** @export */
+  invoke_iiiiddiiii,
   /** @export */
   invoke_iiiidi,
   /** @export */
+  invoke_iiiidid,
+  /** @export */
+  invoke_iiiidii,
+  /** @export */
   invoke_iiiidiii,
+  /** @export */
+  invoke_iiiidiiiii,
   /** @export */
   invoke_iiiii,
   /** @export */
+  invoke_iiiiid,
+  /** @export */
+  invoke_iiiiidd,
+  /** @export */
   invoke_iiiiiddd,
+  /** @export */
+  invoke_iiiiidddd,
   /** @export */
   invoke_iiiiiddi,
   /** @export */
   invoke_iiiiidi,
   /** @export */
+  invoke_iiiiidii,
+  /** @export */
+  invoke_iiiiidiidd,
+  /** @export */
+  invoke_iiiiidiiiiii,
+  /** @export */
   invoke_iiiiii,
   /** @export */
+  invoke_iiiiiid,
+  /** @export */
+  invoke_iiiiiidd,
+  /** @export */
+  invoke_iiiiiiddiddiii,
+  /** @export */
+  invoke_iiiiiiddiiiii,
+  /** @export */
+  invoke_iiiiiidi,
+  /** @export */
+  invoke_iiiiiidiiidd,
+  /** @export */
   invoke_iiiiiii,
+  /** @export */
+  invoke_iiiiiiid,
+  /** @export */
+  invoke_iiiiiiiddi,
   /** @export */
   invoke_iiiiiiidid,
   /** @export */
   invoke_iiiiiiii,
   /** @export */
+  invoke_iiiiiiiidd,
+  /** @export */
+  invoke_iiiiiiiidddddddddiiddii,
+  /** @export */
+  invoke_iiiiiiiidddddddiii,
+  /** @export */
+  invoke_iiiiiiiiddi,
+  /** @export */
   invoke_iiiiiiiiddiiii,
   /** @export */
   invoke_iiiiiiiiddiiiii,
   /** @export */
+  invoke_iiiiiiiidii,
+  /** @export */
   invoke_iiiiiiiii,
+  /** @export */
+  invoke_iiiiiiiiid,
+  /** @export */
+  invoke_iiiiiiiiiddddii,
   /** @export */
   invoke_iiiiiiiiii,
   /** @export */
+  invoke_iiiiiiiiiiddidd,
+  /** @export */
   invoke_iiiiiiiiiii,
+  /** @export */
+  invoke_iiiiiiiiiiidi,
+  /** @export */
+  invoke_iiiiiiiiiiii,
   /** @export */
   invoke_iiiiiiiiiiiid,
   /** @export */
@@ -5567,7 +5854,11 @@ var wasmImports = {
   /** @export */
   invoke_iiiiiiiiiiiiiii,
   /** @export */
+  invoke_iiji,
+  /** @export */
   invoke_v,
+  /** @export */
+  invoke_vddddddiiii,
   /** @export */
   invoke_vddddiiiiiiiiiiii,
   /** @export */
@@ -5577,11 +5868,15 @@ var wasmImports = {
   /** @export */
   invoke_vdddiiii,
   /** @export */
+  invoke_vdddiiiiiiiii,
+  /** @export */
   invoke_vddi,
   /** @export */
   invoke_vddii,
   /** @export */
   invoke_vddiii,
+  /** @export */
+  invoke_vddiiii,
   /** @export */
   invoke_vddiiiiiii,
   /** @export */
@@ -5593,7 +5888,15 @@ var wasmImports = {
   /** @export */
   invoke_vddiiiiiiiiiiiiiiiiiiiiiiii,
   /** @export */
+  invoke_vdi,
+  /** @export */
   invoke_vdiddddi,
+  /** @export */
+  invoke_vdiddii,
+  /** @export */
+  invoke_vdiddiiii,
+  /** @export */
+  invoke_vdiddiiiiii,
   /** @export */
   invoke_vdidii,
   /** @export */
@@ -5625,15 +5928,23 @@ var wasmImports = {
   /** @export */
   invoke_viddddddd,
   /** @export */
+  invoke_vidddddddddddd,
+  /** @export */
   invoke_vidddddddii,
   /** @export */
   invoke_vidddddi,
+  /** @export */
+  invoke_viddddi,
   /** @export */
   invoke_viddddii,
   /** @export */
   invoke_viddddiiii,
   /** @export */
+  invoke_viddddiiiiiii,
+  /** @export */
   invoke_vidddi,
+  /** @export */
+  invoke_vidddidddddd,
   /** @export */
   invoke_vidddiiidi,
   /** @export */
@@ -5641,9 +5952,15 @@ var wasmImports = {
   /** @export */
   invoke_viddid,
   /** @export */
+  invoke_viddidd,
+  /** @export */
+  invoke_viddidddiiii,
+  /** @export */
   invoke_viddii,
   /** @export */
   invoke_viddiii,
+  /** @export */
+  invoke_viddiiii,
   /** @export */
   invoke_viddiiiiii,
   /** @export */
@@ -5653,15 +5970,25 @@ var wasmImports = {
   /** @export */
   invoke_vididd,
   /** @export */
+  invoke_vididdi,
+  /** @export */
+  invoke_vididi,
+  /** @export */
   invoke_vidii,
   /** @export */
   invoke_vidiiddddii,
   /** @export */
+  invoke_vidiidii,
+  /** @export */
   invoke_vidiii,
+  /** @export */
+  invoke_vidiiidi,
   /** @export */
   invoke_vidiiii,
   /** @export */
   invoke_vidiiiiidd,
+  /** @export */
+  invoke_vidiiiiii,
   /** @export */
   invoke_vii,
   /** @export */
@@ -5677,15 +6004,33 @@ var wasmImports = {
   /** @export */
   invoke_viidddddd,
   /** @export */
+  invoke_viidddddddd,
+  /** @export */
+  invoke_viiddddddddiiii,
+  /** @export */
   invoke_viidddddddiiii,
   /** @export */
+  invoke_viidddddi,
+  /** @export */
+  invoke_viiddddi,
+  /** @export */
   invoke_viiddddidd,
+  /** @export */
+  invoke_viidddi,
   /** @export */
   invoke_viidddii,
   /** @export */
   invoke_viiddi,
   /** @export */
+  invoke_viiddidd,
+  /** @export */
   invoke_viiddii,
+  /** @export */
+  invoke_viiddiidi,
+  /** @export */
+  invoke_viiddiii,
+  /** @export */
+  invoke_viiddiiii,
   /** @export */
   invoke_viiddiiiiii,
   /** @export */
@@ -5693,11 +6038,17 @@ var wasmImports = {
   /** @export */
   invoke_viidid,
   /** @export */
+  invoke_viididdi,
+  /** @export */
+  invoke_viididi,
+  /** @export */
   invoke_viidii,
   /** @export */
   invoke_viidiii,
   /** @export */
   invoke_viidiiid,
+  /** @export */
+  invoke_viidiiiii,
   /** @export */
   invoke_viii,
   /** @export */
@@ -5707,15 +6058,33 @@ var wasmImports = {
   /** @export */
   invoke_viiiddd,
   /** @export */
+  invoke_viiidddd,
+  /** @export */
+  invoke_viiiddddddiii,
+  /** @export */
+  invoke_viiiddddi,
+  /** @export */
+  invoke_viiidddidi,
+  /** @export */
   invoke_viiiddi,
+  /** @export */
+  invoke_viiiddiiii,
   /** @export */
   invoke_viiiddiiiiiiiiiiiiii,
   /** @export */
   invoke_viiidi,
   /** @export */
+  invoke_viiidid,
+  /** @export */
+  invoke_viiidii,
+  /** @export */
   invoke_viiidiii,
   /** @export */
+  invoke_viiidiiii,
+  /** @export */
   invoke_viiidiiiii,
+  /** @export */
+  invoke_viiidiiiiiid,
   /** @export */
   invoke_viiidiiiiiii,
   /** @export */
@@ -5723,11 +6092,19 @@ var wasmImports = {
   /** @export */
   invoke_viiiid,
   /** @export */
+  invoke_viiiidd,
+  /** @export */
   invoke_viiiiddd,
+  /** @export */
+  invoke_viiiidddd,
   /** @export */
   invoke_viiiiddddd,
   /** @export */
   invoke_viiiidddddd,
+  /** @export */
+  invoke_viiiiddi,
+  /** @export */
+  invoke_viiiidii,
   /** @export */
   invoke_viiiidiiiiiiiiiii,
   /** @export */
@@ -5735,27 +6112,75 @@ var wasmImports = {
   /** @export */
   invoke_viiiiid,
   /** @export */
+  invoke_viiiiidd,
+  /** @export */
+  invoke_viiiiiddd,
+  /** @export */
+  invoke_viiiiidddd,
+  /** @export */
+  invoke_viiiiiddddi,
+  /** @export */
+  invoke_viiiiiddi,
+  /** @export */
+  invoke_viiiiiddidd,
+  /** @export */
+  invoke_viiiiiddiii,
+  /** @export */
+  invoke_viiiiiddiiii,
+  /** @export */
   invoke_viiiiidi,
   /** @export */
+  invoke_viiiiidii,
+  /** @export */
   invoke_viiiiii,
+  /** @export */
+  invoke_viiiiiid,
+  /** @export */
+  invoke_viiiiiidddi,
+  /** @export */
+  invoke_viiiiiiddi,
   /** @export */
   invoke_viiiiiiddiii,
   /** @export */
   invoke_viiiiiiddiiii,
   /** @export */
+  invoke_viiiiiidii,
+  /** @export */
+  invoke_viiiiiidiidid,
+  /** @export */
   invoke_viiiiiii,
+  /** @export */
+  invoke_viiiiiiiddd,
   /** @export */
   invoke_viiiiiiii,
   /** @export */
+  invoke_viiiiiiiid,
+  /** @export */
+  invoke_viiiiiiiiddi,
+  /** @export */
   invoke_viiiiiiiii,
+  /** @export */
+  invoke_viiiiiiiiid,
+  /** @export */
+  invoke_viiiiiiiiiddi,
   /** @export */
   invoke_viiiiiiiiii,
   /** @export */
+  invoke_viiiiiiiiiid,
+  /** @export */
   invoke_viiiiiiiiiii,
+  /** @export */
+  invoke_viiiiiiiiiiidd,
   /** @export */
   invoke_viiiiiiiiiiidi,
   /** @export */
   invoke_viiiiiiiiiiiidi,
+  /** @export */
+  invoke_viiiiiiiiiiiii,
+  /** @export */
+  invoke_viiiiji,
+  /** @export */
+  invoke_viijii,
   /** @export */
   llvm_eh_typeid_for: _llvm_eh_typeid_for
 };
@@ -6094,6 +6519,17 @@ function invoke_vdiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
   var sp = stackSave();
   try {
     getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiidii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
   } catch(e) {
     stackRestore(sp);
     if (e !== e+0) throw e;
@@ -7058,6 +7494,17 @@ function invoke_diddd(index,a1,a2,a3,a4) {
   }
 }
 
+function invoke_diddi(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_viiiiid(index,a1,a2,a3,a4,a5,a6) {
   var sp = stackSave();
   try {
@@ -7509,6 +7956,17 @@ function invoke_vidid(index,a1,a2,a3,a4) {
   }
 }
 
+function invoke_viddidd(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_viddd(index,a1,a2,a3,a4) {
   var sp = stackSave();
   try {
@@ -7564,6 +8022,28 @@ function invoke_iiidiii(index,a1,a2,a3,a4,a5,a6) {
   }
 }
 
+function invoke_vdddiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiidd(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_viidiii(index,a1,a2,a3,a4,a5,a6) {
   var sp = stackSave();
   try {
@@ -7575,10 +8055,131 @@ function invoke_viidiii(index,a1,a2,a3,a4,a5,a6) {
   }
 }
 
+function invoke_viiidddidi(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vididi(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vddiiii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iidd(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiddd(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viidiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_vidddddi(index,a1,a2,a3,a4,a5,a6,a7) {
   var sp = stackSave();
   try {
     getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_didddddidi(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiddddid(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiddi(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiidii(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
   } catch(e) {
     stackRestore(sp);
     if (e !== e+0) throw e;
@@ -7608,6 +8209,17 @@ function invoke_diiddi(index,a1,a2,a3,a4,a5) {
   }
 }
 
+function invoke_didddidi(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_vdidii(index,a1,a2,a3,a4,a5) {
   var sp = stackSave();
   try {
@@ -7630,10 +8242,65 @@ function invoke_viiiiddd(index,a1,a2,a3,a4,a5,a6,a7) {
   }
 }
 
+function invoke_viiiidd(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiid(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_iidiii(index,a1,a2,a3,a4,a5) {
   var sp = stackSave();
   try {
     return getWasmTableEntry(index)(a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vdiddiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viidddi(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiddddi(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
   } catch(e) {
     stackRestore(sp);
     if (e !== e+0) throw e;
@@ -7652,6 +8319,1315 @@ function invoke_vidddi(index,a1,a2,a3,a4,a5) {
   }
 }
 
+function invoke_vidddddddddddd(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iif(index,a1,a2) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiidii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viijii(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiji(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiji(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiididi(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiddidd(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiid(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiddiddiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiidiidd(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiid(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiiid(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_diid(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_diiddd(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viddidddiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiddidd(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiiiiiidd(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiiiiid(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_diiiiiii(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_diidi(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiid(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiddi(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiidd(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiidid(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiddddidd(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiidddddddddd(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viddddiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_didddii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiidddd(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiidddd(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viddiiii(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiidddd(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiidddd(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiiddd(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vidddidddddd(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiddddddiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iididdi(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiiddddii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_d(index) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)();
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiidd(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iddddiid(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viidddddi(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiddddddiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iddiiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_ddd(index,a1,a2) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_diiid(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_diidii(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_diiidii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_idddii(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_diidd(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viddddi(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iddiddiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiddiddidii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiddiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiddiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiiiidi(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiidiiidd(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viidddddddd(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiidddd(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiddi(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iidddidd(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiidii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiidddi(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vidiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiddiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiidiid(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vidiiidi(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vdiddii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiidiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiidiidid(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiiiid(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiidd(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vididdi(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiidddddddddiiddii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiddddddddiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiiiddi(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiidii(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiddddddi(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiidiiii(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiddddi(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiidii(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iidddi(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiddi(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vidiidii(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiidiiiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiddiiii(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiddiidi(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vddddddiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiidddddddiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiddddi(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiiiiddi(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiidddi(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiiiddidd(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiiiiddi(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vdi(index,a1,a2) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiid(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_vdiddiiii(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiiddi(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_diiiiii(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_diiiii(index,a1,a2,a3,a4,a5) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiddiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiiddiiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiddddddddiii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iddiddddi(index,a1,a2,a3,a4,a5,a6,a7,a8) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiiiiidii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_idiiididii(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiddddi(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_idid(index,a1,a2,a3) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_didii(index,a1,a2,a3,a4) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiddiiid(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viididdi(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiidid(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viididi(index,a1,a2,a3,a4,a5,a6) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiidiiiiiid(index,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_viiddiii(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiiddiidi(index,a1,a2,a3,a4,a5,a6,a7,a8,a9) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7,a8,a9);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
+function invoke_iiiddiii(index,a1,a2,a3,a4,a5,a6,a7) {
+  var sp = stackSave();
+  try {
+    return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);
+  } catch(e) {
+    stackRestore(sp);
+    if (e !== e+0) throw e;
+    _setThrew(1, 0);
+  }
+}
+
 function invoke_iiiddd(index,a1,a2,a3,a4,a5) {
   var sp = stackSave();
   try {
@@ -7663,7 +9639,7 @@ function invoke_iiiddd(index,a1,a2,a3,a4,a5) {
   }
 }
 
-function invoke_diiiiiii(index,a1,a2,a3,a4,a5,a6,a7) {
+function invoke_iiiiiidi(index,a1,a2,a3,a4,a5,a6,a7) {
   var sp = stackSave();
   try {
     return getWasmTableEntry(index)(a1,a2,a3,a4,a5,a6,a7);

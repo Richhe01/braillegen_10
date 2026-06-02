@@ -12,6 +12,8 @@ em++ main.cpp \
   occt/lib/libTKGeomBase.a \
   occt/lib/libTKGeomAlgo.a \
   occt/lib/libTKTopAlgo.a \
+  occt/lib/libTKBool.a \
+  occt/lib/libTKBO.a \
   occt/lib/libTKPrim.a \
   occt/lib/libTKMesh.a \
   occt/lib/libTKShHealing.a \
@@ -21,6 +23,7 @@ em++ main.cpp \
   --embed-file liblouis/tables@/tables \
   -s ALLOW_MEMORY_GROWTH=1 \
   -s EXPORTED_RUNTIME_METHODS="['ccall','FS']" \
+  -s STACK_SIZE=5242880 \
   -o index.js
 
 echo "Run 'python3 -m http.server' to test."
