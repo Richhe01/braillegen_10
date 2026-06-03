@@ -178,6 +178,13 @@ void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char
         
         int success = lou_translateString(tables_str.c_str(), inbuf.data(), &inlen, outbuf.data(), &outlen, nullptr, nullptr, 0);
         std::cout << "success: " << success << std::endl;
+        
+        if (success) {
+            outbuf.resize(outlen);
+            translated_lines.push_back(outbuf);
+        } else {
+            translated_lines.push_back({});
+        }
     }
 
     // 2. Wrap Text based on max_chars_per_line
