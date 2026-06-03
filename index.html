@@ -378,7 +378,7 @@
 
                     // 3. Read the generated STL from Emscripten VFS
                     try {
-                        const stlData = FS.readFile(generatedFileName);
+                        const stlData = Module.FS.readFile(generatedFileName);
                         const blob = new Blob([stlData], { type: 'application/octet-stream' });
                         const url = URL.createObjectURL(blob);
                         
