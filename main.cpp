@@ -129,7 +129,7 @@ void ExportShapeToSTL(const TopoDS_Shape& shape, const std::string& filename) {
         }
     }
     out.close();
-    std::cout << "Shape written to " << filename << std::endl;
+    std::cout << "File written to " << filename << std::endl;
 }
 
 // --- Logic: Unicode to 2x3 Matrix via Bitwise Operations ---
@@ -289,7 +289,7 @@ const char* generateBrailleSTL(const char* raw_text, int max_chars_per_line, con
         return "";
     }
     // Debug: Print wrapped lines and their character counts
-    std::cout << "--- Wrapped Braille Output ---" << std::endl;
+    std::cout << "Wrapped Braille Output:" << std::endl;
     for (size_t i = 0; i < wrapped_lines.size(); ++i) {
         std::cout << "Line " << i + 1 << " (" << wrapped_lines[i].size() << " chars): ";
         for (widechar c : wrapped_lines[i]) {
