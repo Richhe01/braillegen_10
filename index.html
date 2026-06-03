@@ -366,28 +366,33 @@
                     console.log("Sending parameters to C++:", params);
 
                     // 2. Trigger the C++ STL generation
-                    Module.ccall('generateBrailleSTL', null, 
+                    const generatedFileName = Module.ccall('generateBrailleSTL', 'string', 
                         ['string', 'number', 'string', 'number', 'number', 'number', 'number', 'number', 'boolean', 'boolean'], 
                         [params.text, params.charsPerLine, params.brailleTable, params.brailleHeight, params.plateHeight, params.lineSpacing, params.marginSize, params.stlScale, params.slabMode, params.verticalExport]
                     );
                     
+                    if (!generatedFileName) {
+                        statusBar.innerText = "Error: No braille text generated.";
+                        return;
+                    }
+
                     // 3. Read the generated STL from Emscripten VFS
                     try {
-                        const stlData = FS.readFile('braille_plate.stl');
+                        const stlData = FS.readFile(generatedFileName);
                         const blob = new Blob([stlData], { type: 'application/octet-stream' });
                         const url = URL.createObjectURL(blob);
                         
                         // Perform a hidden "click" to prompt the download
                         const a = document.createElement('a');
                         a.href = url;
-                        a.download = 'braille_plate.stl';
+                        a.download = generatedFileName;
                         a.click();
                         URL.revokeObjectURL(url);
                         
                         statusBar.innerText = "Download complete. BrailleGen ready!";
                     } catch (e) {
-                        console.error("Error reading braille_plate.stl:", e);
-                        Module.printErr("Error reading braille_plate.stl: " + e);
+                        console.error("Error reading " + generatedFileName + ":", e);
+                        Module.printErr("Error reading " + generatedFileName + ": " + e);
                         statusBar.innerText = "Error generating file.";
                     }
                 });

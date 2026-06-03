@@ -7,6 +7,10 @@
 #include <utility>
 #include <cstdlib>
 #include <algorithm>
+#include <regex>
+#include <set>
+#include <ctime>
+#include <iomanip>
 
 // OpenCASCADE Includes
 #include <gp_Trsf.hxx>
@@ -119,6 +123,36 @@ std::vector<std::vector<int>> getBrailleMatrix(widechar codepoint) {
     return cell;
 }
 
+// Helper: File name sanitization
+std::string sanitize_filename(const std::string& filename) {
+    // Replace illegal characters with an underscore _
+    std::regex illegal_chars("[^a-zA-Z0-9]");
+    std::string sanitized = std::regex_replace(filename, illegal_chars, "_");
+    
+    // Trim trailing spaces and periods
+    size_t endpos = sanitized.find_last_not_of(" .");
+    if(std::string::npos != endpos) {
+        sanitized = sanitized.substr(0, endpos + 1);
+    } else {
+        sanitized = "";
+    }
+
+    // Avoid reserved names (append an underscore if needed)
+    std::set<std::string> reserved_names = {
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", 
+        "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3",
+        "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+    };
+    
+    std::string upper_sanitized = sanitized;
+    for (char &c : upper_sanitized) {
+        c = std::toupper(static_cast<unsigned char>(c));
+    }
+    if (reserved_names.count(upper_sanitized)) sanitized += "_";
+
+    return sanitized;
+}
+
 // Helper to split string by newline and trim right
 std::vector<std::string> split_text_at_new_line(const std::string& str) {
     std::vector<std::string> result;
@@ -147,9 +181,9 @@ void louLogCallback(logLevels level, const char *message) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char* braille_table,
-                        double braille_height, double plate_height, double line_spacing,
-                        double margin_size, double stl_scale, bool slab_mode, bool vertical_export) {
+const char* generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char* braille_table,
+                               double braille_height, double plate_height, double line_spacing,
+                               double margin_size, double stl_scale, bool slab_mode, bool vertical_export) {
     std::cout << "Starting text translation & STL generation..." << std::endl;
     
     // 1. Liblouis Text Translation
@@ -225,7 +259,7 @@ void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char
     
     if (wrapped_lines.empty()) {
         std::cerr << "No braille text generated (empty input)." << std::endl;
-        return;
+        return "";
     }
     // Debug: Print wrapped lines and their character counts
     std::cout << "--- Wrapped Braille Output ---" << std::endl;
@@ -263,7 +297,7 @@ void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char
     
     if (longest_length == 0) {
         std::cerr << "No valid braille characters generated." << std::endl;
-        return;
+        return "";
     }
 
     // 4. OpenCASCADE Parametric Plate Generation
@@ -400,8 +434,19 @@ void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char
     
     BRepBuilderAPI_Transform apply_final(export_shape, final_trsf);
     export_shape = apply_final.Shape();
+
+    std::time_t t = std::time(nullptr);
+    std::tm tm = *std::localtime(&t);
+    std::ostringstream oss;
+    oss << std::put_time(&tm, "%H-%M-%S");
     
-    ExportShapeToSTL(export_shape, "braille_plate.stl");
+    std::string base_name = lines.empty() ? "braille" : lines[0];
+
+    static std::string file_name;
+    file_name = sanitize_filename(base_name) + "_" + oss.str() + ".stl";
+    ExportShapeToSTL(export_shape, file_name);
+
+    return file_name.c_str();
 }
 
 } // extern "C"
