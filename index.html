@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Braille Tile Generator</title>
+    <link rel="icon" type="image/png" href="assets/xxxxxx.png">
+    <title>BrailleGen 10B</title>
     <style>
         /* Mimic standard Windows desktop application styling */
         body {
@@ -119,6 +120,7 @@
             font-weight: bold;
             font-size: 15px;
             width: 200px;
+            flex-shrink: 0;
         }
 
         .checkbox-row label {
@@ -127,6 +129,7 @@
             margin-right: 20px;
             display: flex;
             align-items: center;
+            white-space: nowrap;
         }
 
         .checkbox-row input[type="checkbox"] {
@@ -250,7 +253,7 @@
             </div>
         </div>
 
-        <div class="status-bar" id="statusBar">Braillegen loading WASM...</div>
+        <div class="status-bar" id="statusBar">BrailleGen loading WASM...</div>
         
         <textarea id="output" rows="4" readonly placeholder="Console output..."></textarea>
     </div>
@@ -331,7 +334,7 @@
             onRuntimeInitialized: () => {
                 const btn = document.getElementById('generateBtn');
                 btn.disabled = false; 
-                statusBar.innerText = "Braillegen ready!";
+                statusBar.innerText = "BrailleGen ready!";
 
                 btn.addEventListener('click', () => {
 
@@ -381,7 +384,7 @@
                         a.click();
                         URL.revokeObjectURL(url);
                         
-                        statusBar.innerText = "Download complete. Braillegen ready!";
+                        statusBar.innerText = "Download complete. BrailleGen ready!";
                     } catch (e) {
                         console.error("Error reading braille_plate.stl:", e);
                         Module.printErr("Error reading braille_plate.stl: " + e);

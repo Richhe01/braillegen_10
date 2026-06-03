@@ -30,6 +30,7 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Wire.hxx>
+#include <Standard_Version.hxx>
 
 #include "liblouis.h"
 
@@ -52,14 +53,17 @@ TopoDS_Shape createExactBrailleDot(double radius, double braille_height) {
     wire_maker.Add(e4); wire_maker.Add(e5);
 
     TopoDS_Face profile_face = BRepBuilderAPI_MakeFace(wire_maker.Wire());
-    gp_Ax1 z_axis(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1));
-    return BRepPrimAPI_MakeRevol(profile_face, z_axis).Shape();
+    
+    // Axis of revolution explicitly formed by p1 (0,0,0) and p5 (0,0,braille_height)
+    gp_Ax1 rev_axis(p1, gp_Dir(gp_Vec(p1, p5)));
+    return BRepPrimAPI_MakeRevol(profile_face, rev_axis).Shape();
 }
 
 // --- Helper: STL Exporter ---
 void ExportShapeToSTL(const TopoDS_Shape& shape, const std::string& filename) {
     std::cout << "Meshing shape..." << std::endl;
-    BRepMesh_IncrementalMesh mesh(shape, 0.1); 
+    // Decrease linear deflection (parameter 2) and angular deflection (parameter 4) for higher mesh quality
+    BRepMesh_IncrementalMesh mesh(shape, 0.08, false, 0.2); 
     
     std::ofstream out(filename);
     out << "solid braille_plate\n";
@@ -148,16 +152,6 @@ void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char
                         double margin_size, double stl_scale, bool slab_mode, bool vertical_export) {
     std::cout << "Starting text translation & STL generation..." << std::endl;
     
-    // Print out the parameters to verify they are received correctly from JS
-    std::cout << "--- Parameters Received ---" << std::endl;
-    std::cout << "braille_height: " << braille_height << " mm" << std::endl;
-    std::cout << "plate_height: " << plate_height << " mm" << std::endl;
-    std::cout << "line_spacing: " << line_spacing << " mm" << std::endl;
-    std::cout << "margin_size: " << margin_size << " mm" << std::endl;
-    std::cout << "stl_scale: " << stl_scale << std::endl;
-    std::cout << "slab_mode: " << (slab_mode ? "true" : "false") << std::endl;
-    std::cout << "vertical_export: " << (vertical_export ? "true" : "false") << std::endl;
-
     // 1. Liblouis Text Translation
     std::string input_text(raw_text);
     std::vector<std::string> lines = split_text_at_new_line(input_text);
@@ -184,20 +178,6 @@ void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char
         
         int success = lou_translateString(tables_str.c_str(), inbuf.data(), &inlen, outbuf.data(), &outlen, nullptr, nullptr, 0);
         std::cout << "success: " << success << std::endl;
-        if (success) {
-            std::cout << "Translated outbuf: ";
-            for (int i = 0; i < outlen; ++i) {
-                if (outbuf[i] < 128) {
-                    std::cout << static_cast<char>(outbuf[i]);
-                } else {
-                    std::cout << "[U+" << std::hex << outbuf[i] << std::dec << "]";
-                }
-            }
-            std::cout << std::endl;
-            translated_lines.push_back(std::vector<widechar>(outbuf.begin(), outbuf.begin() + outlen));
-        } else {
-            std::cerr << "Liblouis translation failed for a line!" << std::endl;
-        }
     }
 
     // 2. Wrap Text based on max_chars_per_line
@@ -280,7 +260,7 @@ void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char
     }
 
     // 4. OpenCASCADE Parametric Plate Generation
-    double diameter = 0.8; 
+    double diameter = 1.6; 
     double radius = diameter / 2.0;
     double spacing = 2.34;
     double distance = 6.2;
@@ -301,24 +281,25 @@ void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char
             plate = BRepPrimAPI_MakeBox(gp_Pnt(-margin_size, 0, 0), gp_Pnt(slab_width - margin_size, max_plate_length, plate_height)).Shape();
             
             // Corner Cutter
+            double cut_depth = std::min(margin_size, 2.0) * 1.2;
             TopoDS_Shape corner_cutter = BRepPrimAPI_MakeBox(5.0, 5.0, plate_height + 2.0).Shape();
             gp_Trsf cut_trsf, trans_trsf;
             cut_trsf.SetRotation(gp_Ax1(gp_Pnt(0,0,0), gp_Dir(0,0,1)), 45.0 * (M_PI / 180.0));
-            trans_trsf.SetTranslation(gp_Vec(-1.0, max_plate_length - 3.0, -1.0));
-            cut_trsf.Multiply(trans_trsf); 
-            BRepBuilderAPI_Transform xform_cutter(corner_cutter, cut_trsf);
+            trans_trsf.SetTranslation(gp_Vec(-margin_size, max_plate_length - cut_depth, -1.0));
+            trans_trsf.Multiply(cut_trsf); 
+            BRepBuilderAPI_Transform xform_cutter(corner_cutter, trans_trsf);
             plate = BRepAlgoAPI_Cut(plate, xform_cutter.Shape()).Shape();
         } else {
-            BRep_Builder plate_builder;
-            TopoDS_Compound plate_compound;
-            plate_builder.MakeCompound(plate_compound);
+            bool first = true;
+            TopoDS_Shape plate_shape;
             
             double top_plate_length = calc_plate_length(the_matrix[0].size());
             double bottom_plate_length = calc_plate_length(the_matrix.back().size());
             
             if (margin_size > 0.0) {
                 TopoDS_Shape top_margin = BRepPrimAPI_MakeBox(gp_Pnt(-margin_size, 0, 0), gp_Pnt(0, top_plate_length, plate_height)).Shape();
-                plate_builder.Add(plate_compound, top_margin);
+                plate_shape = top_margin;
+                first = false;
             }
             
             for (size_t line = 0; line < the_matrix.size(); ++line) {
@@ -326,16 +307,25 @@ void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char
                 double actual_depth = (line == the_matrix.size() - 1) ? (plate_depth - line_spacing) : plate_depth;
                 if (actual_depth > 0.0 && plate_length > 0.0) {
                     TopoDS_Shape line_box = BRepPrimAPI_MakeBox(gp_Pnt(plate_depth * line, 0, 0), gp_Pnt(plate_depth * line + actual_depth, plate_length, plate_height)).Shape();
-                    plate_builder.Add(plate_compound, line_box);
+                    if (first) {
+                        plate_shape = line_box;
+                        first = false;
+                    } else {
+                        plate_shape = BRepAlgoAPI_Fuse(plate_shape, line_box).Shape();
+                    }
                 }
             }
             
             if (margin_size > 0.0) {
                 TopoDS_Shape bottom_margin = BRepPrimAPI_MakeBox(gp_Pnt(total_plate_depth, 0, 0), gp_Pnt(total_plate_depth + margin_size, bottom_plate_length, plate_height)).Shape();
-                plate_builder.Add(plate_compound, bottom_margin);
+                if (first) {
+                    plate_shape = bottom_margin;
+                } else {
+                    plate_shape = BRepAlgoAPI_Fuse(plate_shape, bottom_margin).Shape();
+                }
             }
             
-            plate = plate_compound;
+            plate = plate_shape;
         }
     }
 
@@ -345,6 +335,10 @@ void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char
     compound_builder.MakeCompound(all_dots);
     bool has_dots = false;
 
+    // Pre-calculate the dot shape since it's exactly the same for every dot
+    double embed_depth = (plate_height > 0.0) ? 0.01 : 0.0;
+    TopoDS_Shape base_dot = createExactBrailleDot(radius, braille_height + embed_depth);
+
     for (size_t line = 0; line < the_matrix.size(); ++line) {
         for (size_t char_index = 0; char_index < the_matrix[line].size(); ++char_index) {
             for (int col = 0; col < 2; ++col) {
@@ -353,17 +347,11 @@ void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char
                     if (the_matrix[line][char_index][col][row] == 1) {
                         double x_pos = (plate_depth * line) + (spacing * row + radius);
                         double y_pos = (distance * char_index) + margin_size + (spacing * col + radius);
-                        
-                        // Embed the dot slightly into the plate to ensure safe slicing/boolean intersection
-                        double embed_depth = (plate_height > 0.0) ? 0.01 : 0.0;
                         double z_pos = plate_height - embed_depth;
-                        
-                        // Generate the exact braille profile
-                        TopoDS_Shape dot = createExactBrailleDot(radius, braille_height + embed_depth);
                         
                         gp_Trsf dot_trsf;
                         dot_trsf.SetTranslation(gp_Vec(x_pos, y_pos, z_pos));
-                        BRepBuilderAPI_Transform positioned_dot(dot, dot_trsf);
+                        BRepBuilderAPI_Transform positioned_dot(base_dot, dot_trsf);
 
                         // Add to batch compound
                         compound_builder.Add(all_dots, positioned_dot.Shape());
@@ -374,36 +362,33 @@ void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char
         }
     }
 
-    // 6. Build the Final Compound (Skip fusing to drastically speed up generation and avoid coincident face errors)
-    TopoDS_Compound final_model;
-    BRep_Builder final_builder;
-    final_builder.MakeCompound(final_model);
-    
-    if (plate_height > 0.0) {
-        final_builder.Add(final_model, plate);
-    }
-    
-    if (has_dots) {
-        std::cout << "Adding dots to the plate compound..." << std::endl;
-        final_builder.Add(final_model, all_dots);
-    } else {
-        if (plate_height > 0.0) {
-            std::cout << "No valid dots generated. Outputting blank plate." << std::endl;
-        } else {
-            std::cout << "No valid dots generated and no plate. Outputting empty model." << std::endl;
-        }
-    }
+    // 6. Build the Final Shape by fusing
+    TopoDS_Shape export_shape;
 
-    TopoDS_Shape export_shape = final_model;
+    if (plate_height > 0.0 && has_dots) {
+        std::cout << "Fusing geometry..." << std::endl;
+        export_shape = BRepAlgoAPI_Fuse(plate, all_dots).Shape();
+    } else if (plate_height > 0.0) {
+        std::cout << "No valid dots generated. Outputting blank plate." << std::endl;
+        export_shape = plate;
+    } else if (has_dots) {
+        std::cout << "No plate generated. Outputting dots only." << std::endl;
+        export_shape = all_dots;
+    } else {
+        std::cout << "No valid dots generated and no plate. Outputting empty model." << std::endl;
+        TopoDS_Compound empty_model;
+        BRep_Builder().MakeCompound(empty_model);
+        export_shape = empty_model;
+    }
 
     // 7. Post-Transformations
-    gp_Trsf rot_z, rot_y, scale_trsf;
+    gp_Trsf rot_z, rot_x, scale_trsf;
     rot_z.SetRotation(gp_Ax1(gp_Pnt(0,0,0), gp_Dir(0,0,1)), -90.0 * (M_PI / 180.0));
-    rot_y.SetRotation(gp_Ax1(gp_Pnt(0,0,0), gp_Dir(0,1,0)), (vertical_export ? 90.0 : 0.0) * (M_PI / 180.0));
+    rot_x.SetRotation(gp_Ax1(gp_Pnt(0,0,0), gp_Dir(1,0,0)), (vertical_export ? 90.0 : 0.0) * (M_PI / 180.0));
     scale_trsf.SetScale(gp_Pnt(0,0,0), stl_scale);
     
     gp_Trsf final_trsf = scale_trsf;
-    final_trsf.Multiply(rot_y);
+    final_trsf.Multiply(rot_x);
     final_trsf.Multiply(rot_z);
     
     BRepBuilderAPI_Transform apply_final(export_shape, final_trsf);
@@ -415,7 +400,8 @@ void generateBrailleSTL(const char* raw_text, int max_chars_per_line, const char
 } // extern "C"
 
 int main() {
-    std::cout << "BrailleGen WebAssembly Core loaded." << std::endl;
-    std::cout << "liblouis version: " << lou_version() << std::endl;
+    std::cout << "BrailleGen WASM Core loaded." << std::endl;
+    std::cout << "Liblouis version: " << lou_version() << std::endl;
+    std::cout << "OpenCASCADE version: " << OCC_VERSION_STRING << std::endl;
     return 0;
 }
