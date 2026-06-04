@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="BrailleGen 10B is a fast, offline web application that generates highly customizable 3D printable Braille STL files from text.">
-    <meta name="keywords" content="Braille, 3D Printing, STL, Generator, Translator, liblouis">
+    <meta name="description" content="BrailleGen is a fast, offline web application that generates highly customizable 3D printable Braille STL files from text.">
+    <meta name="keywords" content="Braille, 3D Printing, STL, Generator, Translator, liblouis, labels">
     <meta property="og:title" content="BrailleGen 10B">
     <meta property="og:description" content="Generate 3D printable Braille models directly in your browser. Fully offline and customizable.">
     <meta property="og:type" content="website">
@@ -20,7 +20,7 @@
 
         body {
             font-family: 'CustomFont', sans-serif;
-            background-color: #f0f0f0;
+            background-color: #4768BC;
             color: #000;
             display: flex;
             align-items: center;
@@ -32,11 +32,12 @@
         }
         
         .window {
-            background: #f0f0f0;
-            border: 1px solid #ccc;
-            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            background: #e6e6e6;
+            border: 2px solid;
+            border-color: #ffffff #000000 #000000 #ffffff;
+            box-shadow: inset 1px 1px #dfdfdf, inset -1px -1px #808080, 2px 2px 5px rgba(0,0,0,0.5);
             width: 100%;
-            max-width: 650px;
+            max-width: 550px;
             transition: max-width 0.2s ease-in-out;
             display: flex;
             flex-direction: column;
@@ -82,12 +83,14 @@
             resize: vertical;
             padding: 4px;
             font-family: inherit;
-            border: 1px solid #a0a0a0;
+            border: 2px solid;
+            border-color: #808080 #ffffff #ffffff #808080;
         }
 
         .generate-row {
             display: flex;
-            justify-content: center;
+            justify-content: flex-start;
+            margin-left: 140px;
             margin-bottom: 10px;
         }
 
@@ -97,6 +100,10 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 15px;
+        }
+        
+        .section-header h2 {
+            margin: 0;
         }
 
         .settings-grid {
@@ -116,7 +123,8 @@
         .settings-grid select,
         .settings-grid input[type="text"] {
             padding: 4px;
-            border: 1px solid #a0a0a0;
+            border: 2px solid;
+            border-color: #808080 #ffffff #ffffff #808080;
             font-family: inherit;
             font-size: 14px;
             width: 100%;
@@ -153,26 +161,25 @@
 
         /* Buttons */
         button {
-            background-color: #ffffff;
+            background-color: #c0c0c0;
             color: #000;
-            border: 1px solid #a0a0a0;
+            border: 2px solid;
+            border-color: #ffffff #000000 #000000 #ffffff;
             padding: 6px 15px;
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
-            transition: background-color 0.1s;
-        }
-
-        button:hover:not(:disabled) {
-            background-color: #e6e6e6;
+            outline: none;
         }
 
         button:active:not(:disabled) {
-            background-color: #cccccc;
+            border-color: #808080 #ffffff #ffffff #808080;
+            padding: 7px 14px 5px 16px;
         }
 
         button:disabled {
-            color: #888;
+            color: #808080;
+            text-shadow: 1px 1px #ffffff;
             cursor: not-allowed;
         }
 
@@ -181,49 +188,68 @@
             padding: 8px 30px;
         }
 
+        #generateBtn:active:not(:disabled) {
+            padding: 9px 29px 7px 31px;
+        }
+
         #defaultsBtn {
             font-size: 14px;
             padding: 4px 12px;
+        }
+
+        #defaultsBtn:active:not(:disabled) {
+            padding: 5px 11px 3px 13px;
         }
 
         /* Status & Console */
         .status-bar {
             padding: 4px 10px;
             font-size: 14px;
-            color: #555;
-            border-top: 1px solid #d9d9d9;
-            background-color: #f0f0f0;
+            color: #000;
+            border: 2px solid;
+            border-color: #808080 #ffffff #ffffff #808080;
+            background-color: #c0c0c0;
+            margin: 4px;
         }
 
         /* Tabs */
         .tabs {
             display: flex;
-            background-color: #e0e0e0;
-            border-bottom: 1px solid #ccc;
+            background-color: #c0c0c0;
+            border-bottom: 2px solid #ffffff;
             flex-wrap: wrap;
+            padding-top: 4px;
+            padding-left: 4px;
         }
 
         .tab {
             padding: 8px 16px;
             cursor: pointer;
-            border: none;
-            background: none;
+            border: 2px solid;
+            border-color: #ffffff #000000 #000000 #ffffff;
+            background: #c0c0c0;
             font-family: inherit;
             font-size: 14px;
-            border-right: 1px solid #ccc;
-            border-bottom: 1px solid transparent;
-            margin-bottom: -1px;
+            margin-right: 2px;
+            margin-bottom: -2px;
             outline: none;
-        }
-
-        .tab:hover {
-            background-color: #d0d0d0;
+            border-bottom: none;
+            position: relative;
+            top: 2px;
         }
 
         .tab.active {
-            background-color: #f0f0f0;
+            background-color: #c0c0c0;
             font-weight: bold;
-            border-bottom: 1px solid #f0f0f0;
+            border-bottom: 2px solid #c0c0c0;
+            padding-bottom: 10px;
+            top: 0;
+            z-index: 1;
+        }
+
+        .tab:active:not(.active) {
+            border-color: #808080 #ffffff #ffffff #808080;
+            padding: 9px 15px 7px 17px;
         }
 
         .github-link {
@@ -234,16 +260,25 @@
             text-decoration: none;
             display: flex;
             align-items: center;
+            border: 2px solid;
+            border-color: #ffffff #000000 #000000 #ffffff;
+            background: #c0c0c0;
+            margin-right: 4px;
+            margin-bottom: 4px;
+            box-sizing: border-box;
         }
 
-        .github-link:hover {
-            background-color: #d0d0d0;
+        .github-link:active {
+            border-color: #808080 #ffffff #ffffff #808080;
+            padding: 9px 15px 7px 17px;
         }
 
         .tab-content {
             display: none;
             flex-direction: column;
             flex-grow: 1;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
         .tab-content.active {
@@ -257,7 +292,8 @@
             font-family: 'Courier New', Courier, monospace;
             font-size: 12px;
             padding: 8px;
-            border: none;
+            border: 2px solid;
+            border-color: #808080 #ffffff #ffffff #808080;
             resize: none;
             box-sizing: border-box;
             outline: none;
@@ -343,7 +379,7 @@
 
         <div id="tab-docs" class="tab-content">
             <!-- Replace this URL with your actual published Google Doc embed URL -->
-            <iframe src="https://docs.google.com/document/d/e/2PACX-1vSW58YO02QIHbZbsao0XwDgwoOG_gqLRO66WPePjjpPT2AYRI3-uGR6LTb3M6we0ScXPiWs72HKrotx/pub?embedded=true" style="width:100%; height: 500px; border: none;" title="App Documentation"></iframe>
+            <iframe src="https://docs.google.com/document/d/e/2PACX-1vSW58YO02QIHbZbsao0XwDgwoOG_gqLRO66WPePjjpPT2AYRI3-uGR6LTb3M6we0ScXPiWs72HKrotx/pub?embedded=true" style="width:100%; min-width: 800px; height: 500px; border: none;" title="App Documentation"></iframe>
         </div>
 
         <div id="tab-console" class="tab-content">
@@ -352,7 +388,7 @@
         </div>
 
         <div id="tab-license" class="tab-content">
-            <iframe src="LICENSE.md?v=2" style="width:100%; height: 500px; border: none;" title="License Document"></iframe>
+            <iframe src="LICENSE.md?v=2" style="width:100%; min-width: 800px; height: 500px; border: none;" title="License Document"></iframe>
         </div>
     </div>
 
